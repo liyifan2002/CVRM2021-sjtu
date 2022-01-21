@@ -1,0 +1,4 @@
+/data/*.avi
+/data/calib/
+.vs/
+cmake-build-debug/
