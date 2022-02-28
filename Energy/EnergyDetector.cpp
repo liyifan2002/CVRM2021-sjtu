@@ -6,6 +6,7 @@
 #define IMGHEIGHT 820
 
 #include <fstream>
+
 #include "utils/timers.h"
 
 using namespace std;
@@ -13,7 +14,7 @@ using namespace std;
 Mat outline;
 bool blueTarget = 1;
 bool showEnergy = true;
-Timers t2;
+Timers time_energy;
 
 // 多项式拟合
 inline Eigen::MatrixXd LeastSquare(vector<float> x, vector<float> y, int N) {
@@ -92,6 +93,7 @@ void EnergyDetector::initEnergy() {
 
 /**
  * @brief EnergyDetector::initEnergyPartParam
+ *
  * @param null
  * @return null
  * @remark 初始化参数
@@ -191,20 +193,20 @@ void EnergyDetector::EnergyTask(const Mat &src, int8_t mode, const float deltaT)
     clearAll();//先清空容器
     Mat binary;//二值化数组
     BIG_MODE = mode;
-    t2.reset();
-    roi = preprocess(src); //预处理 通道运算 提取出指定颜色的数据 并过滤白光 //todo 是不是可以优化传参方式
+    time_energy.reset();
+    roi = preprocess(src); //预处理 通道运算 提取出指定颜色的数据 并过滤白光
     //binary = preprocess(img);
     //roi = binary;
     //findROI(binary,roi); //设定roi
     //imshow("roi",roi);
-    Ticks(t2, "preprocess");
+    Ticks(time_energy, "preprocess");
     if (detectArmor(roi) && detectFlowStripFan(roi) && getTargetPoint(roi)) {
         getPts(target_armor); //获得的装甲板4点
-        Ticks(t2, "getPts");
+        Ticks(time_energy, "getPts");
         detectCircleCenter(roi); //识别旋转圆心
-        Ticks(t2, "detectCircleCenter");
+        Ticks(time_energy, "detectCircleCenter");
         calOmega(deltaT); //计算当前的角速度 cur_omega 为当前三阶差分计算的角速度 av_omega.back() 为 4 次角速度平滑均值
-        Ticks(t2, "calOmega");
+        Ticks(time_energy, "calOmega");
         //waveClass.displayWave(av_omega.back(), 1.305);
         if (judgeRotation(src, deltaT)) {
             //大小符模式 开始预测
@@ -213,7 +215,7 @@ void EnergyDetector::EnergyTask(const Mat &src, int8_t mode, const float deltaT)
             } else if (mode == 1) {
                 getPredictPointSmall(roi);
             }
-            Ticks(t2, "getPredictPoint");
+            Ticks(time_energy, "getPredictPoint");
             //roiPoint2src();
             detect_flag = true;
             misscount = 0;
@@ -345,7 +347,7 @@ Mat EnergyDetector::preprocess(const Mat &src) {
     threshold(red_c, red_binary, 90, 255, THRESH_BINARY);
 
     binary = blueTarget ? blue_binary - red_binary : red_binary - blue_binary; //滤掉白光
-    Ticks(t2,"threshold");
+    Ticks(time_energy, "threshold");
 
 //TODO 用相机时卷积核用3*3，视频测试亮度低用5*5
     Mat element_dilate_1 = getStructuringElement(MORPH_RECT, Size(3, 3));
@@ -353,7 +355,7 @@ Mat EnergyDetector::preprocess(const Mat &src) {
     morphologyEx(binary, binary, MORPH_CLOSE, element_dilate_1);
     threshold(binary, binary, 0, 255, THRESH_BINARY);
 
-    GaussianBlur(binary, binary, Size(3, 3), 0);
+    GaussianBlur(binary, binary, Size(3, 3), 0);//???
 
     return binary;
 }
@@ -404,9 +406,6 @@ void EnergyDetector::roiPoint2src() {
 bool EnergyDetector::detectArmor(Mat &src) {
     //armor dilate
     Mat armor_dilate = src;
-#if DEBUG == 1
-    imshow("armor_dilate", armor_dilate);
-#endif
     //寻找所有装甲
     std::vector<vector<Point> > armor_contours;
     std::vector<vector<Point> > armor_contours_external;
@@ -445,7 +444,7 @@ bool EnergyDetector::detectArmor(Mat &src) {
         armors.emplace_back(flow_rect);//回传所有装甲板到armors容器中
         armor_centers.emplace_back(flow_rect.center);//回传所有装甲板center到armor_center容器中
     }
-    Ticks(t2, "detectArmor");
+    Ticks(time_energy, "detectArmor");
     if (armors.empty()) {
         return false;
     }
@@ -493,12 +492,11 @@ bool EnergyDetector::detectFlowStripFan(Mat &src) {
 
         valid_fan_strip.emplace_back(flow_rect);
     }
-    Ticks(t2, "detectFlowFan");
+    Ticks(time_energy, "detectFlowFan");
     if (valid_fan_strip.empty())
         return false;
 
     return true;
-
 
 }
 
@@ -537,6 +535,120 @@ bool EnergyDetector::detectCircleCenter(Mat &src) {
 
     }
     return false;
+}
+
+/**
+ * @brief EnergyDetector::isValidArmorContour
+ * @param vector<Point>& armor_contour
+ * @return bool
+ * @remark 判断找到的装甲Armor尺寸是否合格
+ */
+bool EnergyDetector::isValidArmorContour(const vector<cv::Point> &armor_contour) const {//
+    //筛选 通过轮廓面积、最小外接矩形面积、长宽比来筛选出是否为指定目标
+    double cur_contour_area = contourArea(armor_contour);
+//    LOGW("============Vaild Armor=================");
+//    LOGW("Count : %d\t Area : %lf", debug_cur_count++, cur_contour_area);
+    if (!IN_RANGE(cur_contour_area, _flow.armor_contour_area_min, _flow.armor_contour_area_max)) {
+        //TODO
+        //cout << "armor_contour_area:" << cur_contour_area << endl;
+        return false;
+    }
+
+    RotatedRect cur_rect = minAreaRect(armor_contour);
+    Size2f cur_size = cur_rect.size;
+    float length, width;
+    if (cur_size.height > cur_size.width)
+        length = cur_size.height, width = cur_size.width;
+    else
+        length = cur_size.width, width = cur_size.height;
+
+    if (!IN_RANGE(length, _flow.armor_contour_length_min, _flow.armor_contour_length_max) ||
+        !IN_RANGE(width, _flow.armor_contour_width_min, _flow.armor_contour_width_max)) {
+        //TODO
+        //cout << "armor_contour_length:" << length << endl;
+        //cout << "armor_contour_width:" << width << endl;
+        return false;
+    }
+
+    float length_width_ratio = length / width;
+
+    if (!IN_RANGE(length_width_ratio, _flow.armor_contour_hw_ratio_min, _flow.armor_contour_hw_ratio_max)) {
+        //TODO
+        //cout << "armor_contour_hw_ratio" << length_width_ratio <<endl;
+        return false;
+    }
+    //cout << "right armor area : " << cur_contour_area << endl;
+    //cout << "armor ratio : " << length_width_ratio << endl;
+    return true;
+}
+
+
+/**
+ * @brief EnergyDetector::isValidFlowStripFanContour
+ * @param vector<Point>& flow_strip_fan_contour
+ * @return bool
+ * @remark 判断找到的含有流动条的扇叶尺寸是否合格
+ */
+bool EnergyDetector::isValidFlowStripFanContour(cv::Mat &src, const vector<cv::Point> &flow_strip_fan_contour) const {
+//    LOGW("============Vaild Flow=================");
+//    LOGW("Area : %lf", cur_contour_area);
+
+    RotatedRect cur_rect = minAreaRect(flow_strip_fan_contour);
+    Size2f cur_size = cur_rect.size;
+
+    float length = cur_size.height > cur_size.width ? cur_size.height : cur_size.width;
+    float width = cur_size.height < cur_size.width ? cur_size.height : cur_size.width;
+//    LOGW("Length : %f\t Width : %f", length, width);
+    if (length < _flow.flow_strip_fan_contour_length_min
+        || width < _flow.flow_strip_fan_contour_width_min
+        || length > _flow.flow_strip_fan_contour_length_max
+        || width > _flow.flow_strip_fan_contour_width_max) {
+        //TODO
+        //cout << "flow_strip_fan_contour_length" << length << endl;
+        //cout << "flow_strip_fan_contour_width" << width << endl;
+        return false;
+    }
+
+    float length_width_ratio = length / width;
+//    LOGW("Ratio : %f", length_width_ratio);
+//    LOGW("Rect Size : %f\t Contour Size : %lf", cur_size.area(), cur_contour_area);
+    if (length_width_ratio > _flow.flow_strip_fan_contour_hw_ratio_max ||
+        length_width_ratio < _flow.flow_strip_fan_contour_hw_ratio_min) {
+        //TODO
+        //cout << "flow_strip_fan_contour_hw_ratio" << length_width_ratio << endl;
+        return false;
+    }
+
+    double cur_contour_area = contourArea(flow_strip_fan_contour);
+    if (!IN_RANGE(cur_contour_area, _flow.flow_strip_fan_contour_area_min, _flow.flow_strip_fan_contour_area_max)) {
+        //TODO
+        //cout << "flow_strip_fan_contour_area" << cur_contour_area << endl;
+        return false;
+    }
+    if (cur_contour_area / cur_size.area() < _flow.flow_strip_fan_contour_area_ratio_min
+        || cur_contour_area / cur_size.area() > _flow.flow_strip_fan_contour_area_ratio_max) {
+        //TODO
+        //cout << "flow_strip_fan_contour_area_ratio" << cur_contour_area / cur_size.area() << endl; //流动条轮廓占总面积的比例
+        return false;
+    }
+
+    return true;
+}
+
+
+/**
+ * @brief EnergyDetector::isValidCenterRContour
+ * @param vector<Point>& center_R_contour
+ * @return bool
+ * @remark 判断找到的中心点R尺寸是否合格
+ */
+bool EnergyDetector::isValidCenterRContour(const vector<cv::Point> &center_R_contour) {
+    double cur_contour_area = contourArea(center_R_contour);
+    if (cur_contour_area > _flow.Center_R_Control_area_max ||
+        cur_contour_area < _flow.Center_R_Control_area_min) {
+        return false;
+    }
+    return true;
 }
 
 
@@ -595,7 +707,7 @@ bool EnergyDetector::getTargetPoint(Mat &src) {
 
         target_armor = armors[target_blade.armor_index];
         last_target_armor = target_armor;        //update
-        Ticks(t2, "getArmorPosition");
+        Ticks(time_energy, "getArmorPosition");
     } else {
         return false;
     }
@@ -610,6 +722,7 @@ bool EnergyDetector::getTargetPoint(Mat &src) {
         target_armor_centers.push_back(target_point);
     return true;
 }
+
 
 /**
  * @remark: 计算中心R标所在区域
@@ -630,7 +743,8 @@ Point2f EnergyDetector::calR() {
     }
 
     Point2f blade_bounding_mid =
-            (blade_points[center_blade_edge_index] + blade_points[(center_blade_edge_index + 1) % 4]) / 2; //扇叶靠近圆心的边的中点
+            (blade_points[center_blade_edge_index] + blade_points[(center_blade_edge_index + 1) % 4]) /
+            2; //扇叶靠近圆心的边的中点
 
     Point2f armor_bounding_mid;
     Point2f armor_mid_vec;
@@ -646,6 +760,33 @@ Point2f EnergyDetector::calR() {
     }
     Point2f center_point = target_point + K * armor2center_vec;
     return center_point;
+}
+
+/**
+ * @brief 计算当前差角及角速度
+ * */
+void EnergyDetector::calOmega(float deltaT) {
+    if (cnt_t != 0) //确认启动大幅预测
+        time_series.push_back(CalWasteTime(startT, getTickFrequency()) / 1000); //记录下当前的时间戳
+
+    Point2f p = circle_center_point - target_point;             //指向圆心的向量
+    float cur_theta = atan2(p.y, p.x) / (2 * CV_PI) * 360;     //当前角度
+    theta.push_back(cur_theta);
+    delta_theta.push_back(cur_theta - theta[theta.size() - 4]);  //相隔3个数相减  size()-1-3
+    if (delta_theta.back() > 300) //解决 180 -180 跳变问题//todo ?????
+        delta_theta.back() = 360 - delta_theta.back();
+    cur_omega = abs(delta_theta.back()) / (deltaT * 3.0 / 1000) * (2 * CV_PI / 360); //转为弧度制,算3帧的角速度
+    //cout << "--- current spd : " << cur_omega << endl;
+    if (cur_omega > 2.15)//角速度限幅
+        cur_omega = 2.15;
+    omega.push_back(cur_omega); //将当前的 cur_omega 存放在 omega 数组中
+
+    //cout << "current omega = " << cur_omega << endl;
+    float sum_omega = 0;
+    for (int i = 0; i < 4; i++) {
+        sum_omega += omega[omega.size() - 1 - i];
+    }
+    av_omega.push_back(sum_omega / 4); //4次角速度平滑均值
 }
 
 /**
@@ -744,32 +885,6 @@ void EnergyDetector::getPredictPoint(const Mat &src, float deltaT) {
 
 }
 
-/**
- * @brief 计算当前差角及角速度
- * */
-void EnergyDetector::calOmega(float deltaT) {
-    if (cnt_t != 0) //确认启动大幅预测
-        time_series.push_back(CalWasteTime(startT, getTickFrequency()) / 1000); //记录下当前的时间戳
-
-    Point2f p = circle_center_point - target_point;             //指向圆心的向量
-    float cur_theta = atan2(p.y, p.x) / (2 * CV_PI) * 360;     //当前角度
-    theta.push_back(cur_theta);
-    delta_theta.push_back(cur_theta - theta[theta.size() - 4]);  //相隔3个数相减  size()-1-3
-    if (delta_theta.back() > 300) //解决 180 -180 跳变问题//todo ?????
-        delta_theta.back() = 360 - delta_theta.back();
-    cur_omega = abs(delta_theta.back()) / (deltaT * 3 / 1000) * (2 * CV_PI / 360); //转为弧度制,算3帧的角速度
-    //cout << "--- current spd : " << cur_omega << endl;
-    if (cur_omega > 2.15)//角速度限幅
-        cur_omega = 2.15;
-    omega.push_back(cur_omega); //将当前的 cur_omega 存放在 omega 数组中
-
-    //cout << "current omega = " << cur_omega << endl;
-    float sum_omega = 0;
-    for (int i = 0; i < 4; i++) {
-        sum_omega += omega[omega.size() - 1 - i];
-    }
-    av_omega.push_back(sum_omega / 4); //4次角速度平滑均值
-}
 
 float EnergyDetector::spd_int(float t) {
     return 1.305 * t - 0.4167 * cos(1.884 * t);
@@ -835,105 +950,6 @@ void EnergyDetector::updateLastValues() {
     last_frame_time = frame_time;
 }
 
-/**
- * @brief EnergyDetector::isValidArmorContour
- * @param vector<Point>& armor_contour
- * @return bool
- * @remark 判断找到的装甲Armor尺寸是否合格
- */
-bool EnergyDetector::isValidArmorContour(const vector<cv::Point> &armor_contour) const {//
-    //筛选 通过轮廓面积、最小外接矩形面积、长宽比来筛选出是否为指定目标
-    double cur_contour_area = contourArea(armor_contour);
-//    LOGW("============Vaild Armor=================");
-//    LOGW("Count : %d\t Area : %lf", debug_cur_count++, cur_contour_area);
-    if (cur_contour_area > _flow.armor_contour_area_max ||
-        cur_contour_area < _flow.armor_contour_area_min) {
-        //TODO
-        //cout << "armor_contour_area:" << cur_contour_area << endl;
-        return false;
-    }
-
-    RotatedRect cur_rect = minAreaRect(armor_contour);
-    Size2f cur_size = cur_rect.size;
-    float length = cur_size.height > cur_size.width ? cur_size.height : cur_size.width;
-    float width = cur_size.height < cur_size.width ? cur_size.height : cur_size.width;
-//    LOGW("Length : %f\t Width : %f", length, width);
-    if (length < _flow.armor_contour_length_min || width < _flow.armor_contour_width_min ||
-        length > _flow.armor_contour_length_max || width > _flow.armor_contour_width_max) {
-        //TODO
-        //cout << "armor_contour_length:" << length << endl;
-        //cout << "armor_contour_width:" << width << endl;
-        return false;
-    }
-
-    float length_width_ratio = length / width;
-
-    if (length_width_ratio > _flow.armor_contour_hw_ratio_max ||
-        length_width_ratio < _flow.armor_contour_hw_ratio_min) {
-        //TODO
-        //cout << "armor_contour_hw_ratio" << length_width_ratio <<endl;
-        return false;
-    }
-    //cout << "right armor area : " << cur_contour_area << endl;
-    //cout << "armor ratio : " << length_width_ratio << endl;
-    return true;
-}
-
-
-/**
- * @brief EnergyDetector::isValidFlowStripFanContour
- * @param vector<Point>& flow_strip_fan_contour
- * @return bool
- * @remark 判断找到的含有流动条的扇叶尺寸是否合格
- */
-bool EnergyDetector::isValidFlowStripFanContour(cv::Mat &src, const vector<cv::Point> &flow_strip_fan_contour) const {
-    double cur_contour_area = contourArea(flow_strip_fan_contour);
-//    LOGW("============Vaild Flow=================");
-//    LOGW("Area : %lf", cur_contour_area);
-    if (cur_contour_area > _flow.flow_strip_fan_contour_area_max ||
-        cur_contour_area < _flow.flow_strip_fan_contour_area_min) {
-        //TODO
-        //cout << "flow_strip_fan_contour_area" << cur_contour_area << endl;
-        return false;
-    }
-
-    RotatedRect cur_rect = minAreaRect(flow_strip_fan_contour);
-    Size2f cur_size = cur_rect.size;
-
-    float length = cur_size.height > cur_size.width ? cur_size.height : cur_size.width;
-    float width = cur_size.height < cur_size.width ? cur_size.height : cur_size.width;
-//    LOGW("Length : %f\t Width : %f", length, width);
-    if (length < _flow.flow_strip_fan_contour_length_min
-        || width < _flow.flow_strip_fan_contour_width_min
-        || length > _flow.flow_strip_fan_contour_length_max
-        || width > _flow.flow_strip_fan_contour_width_max) {
-        //TODO
-        //cout << "flow_strip_fan_contour_length" << length << endl;
-        //cout << "flow_strip_fan_contour_width" << width << endl;
-        return false;
-    }
-
-    float length_width_ratio = length / width;
-//    LOGW("Ratio : %f", length_width_ratio);
-//    LOGW("Rect Size : %f\t Contour Size : %lf", cur_size.area(), cur_contour_area);
-    if (length_width_ratio > _flow.flow_strip_fan_contour_hw_ratio_max ||
-        length_width_ratio < _flow.flow_strip_fan_contour_hw_ratio_min) {
-        //TODO
-        //cout << "flow_strip_fan_contour_hw_ratio" << length_width_ratio << endl;
-        return false;
-    }
-
-    if (cur_contour_area / cur_size.area() < _flow.flow_strip_fan_contour_area_ratio_min
-        || cur_contour_area / cur_size.area() > _flow.flow_strip_fan_contour_area_ratio_max) {
-        //TODO
-        //cout << "flow_strip_fan_contour_area_ratio" << cur_contour_area / cur_size.area() << endl; //流动条轮廓占总面积的比例
-        return false;
-    }
-
-    return true;
-}
-
-
 //todo 工具类函数
 /**
  * @brief EnergyDetector::pointDistance
@@ -944,7 +960,8 @@ bool EnergyDetector::isValidFlowStripFanContour(cv::Mat &src, const vector<cv::P
 double EnergyDetector::pointDistance(const cv::Point &point_1, const cv::Point &point_2) {
     double distance = 0;
     distance = sqrt(
-            pow(static_cast<double>(point_1.x - point_2.x), 2) + pow(static_cast<double>(point_1.y - point_2.y), 2));
+            pow(static_cast<double>(point_1.x - point_2.x), 2) +
+            pow(static_cast<double>(point_1.y - point_2.y), 2));
     return distance;
 }
 
@@ -968,19 +985,4 @@ void EnergyDetector::getPts(RotatedRect armor) {
         pts[2] = rectPoints[3];
         pts[3] = rectPoints[0];
     }
-}
-
-/**
- * @brief EnergyDetector::isValidCenterRContour
- * @param vector<Point>& center_R_contour
- * @return bool
- * @remark 判断找到的中心点R尺寸是否合格
- */
-bool EnergyDetector::isValidCenterRContour(const vector<cv::Point> &center_R_contour) {
-    double cur_contour_area = contourArea(center_R_contour);
-    if (cur_contour_area > _flow.Center_R_Control_area_max ||
-        cur_contour_area < _flow.Center_R_Control_area_min) {
-        return false;
-    }
-    return true;
 }

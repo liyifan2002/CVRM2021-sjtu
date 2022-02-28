@@ -29,23 +29,24 @@ find_package(fmt)
 add_subdirectory(include/serial)
 
 if (CAM STREQUAL DH)
-    set(CAM_DRV Stream/DAHUA.cpp)
+    set(CAM_DRV include/camera/general/DAHUA.cpp)
     set(CAM_LIB include/camera/DAHUA/lib/MVSDKmd.lib)
 else ()
-    set(CAM_DRV Stream/MindVision.cpp)
+    set(CAM_DRV include/camera/general/MindVision.cpp)
     set(CAM_LIB include/camera/MVSDK/lib/MVCAMSDK_X64.lib)
 endif ()
 
 if (EN_ENERGY)
-    aux_source_directory(Energy Energy_SRCS)
+    #aux_source_directory(Energy Energy_SRCS)
 endif ()
 
 add_executable(${PROJECT_NAME}
         CV2022.cpp
-        Stream/Stream.cpp
+        Stream/grab.cpp
         Stream/record.cpp
         ${CAM_DRV}
         ${Energy_SRCS}
+        Energy/Energy.cpp
         )
 target_include_directories(CV2022 PUBLIC
         ${GLOG_INCLUDE_DIRS}

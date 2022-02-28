@@ -1,0 +1,38 @@
+%YAML:1.0
+---
+DAHUA:
+   IntrinsicMatrix: !!opencv-matrix
+      rows: 3
+      cols: 3
+      dt: d
+      data: [ 1.8502865086692914e+03, 0., 4.1400382586712959e+02, 0.,
+          2.5069709507094281e+03, 5.1369523678621658e+02, 0., 0., 1. ]
+   DistortionCoefficient: !!opencv-matrix
+      rows: 1
+      cols: 5
+      dt: d
+      data: [ -1.6295834785147581e-01, -1.4962484232427262e+00,
+          -4.5291374505468399e-02, 2.0930654724319257e-02,
+          2.2937534742550007e+01 ]
+...
+---
+DH01:
+   exposureTime: 10000
+   frameRate: 120
+   imHeight: 1280
+   imWidth: 1024
+   imGain: 1024
+   imGamma: 1
+   rGain: 1
+   gGain: 1
+   bGain: 1
+   intrinsicMatrix: !!opencv-matrix
+      rows: 0
+      cols: 0
+      dt: u
+      data: []
+   distortionCoefficient: !!opencv-matrix
+      rows: 0
+      cols: 0
+      dt: u
+      data: []

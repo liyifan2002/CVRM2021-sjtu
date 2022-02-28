@@ -660,10 +660,10 @@ private:
   class ScopedReadLock;
   class ScopedWriteLock;
 
-  // Read common function
+  // Read general function
   size_t
   read_ (uint8_t *buffer, size_t size);
-  // Write common function
+  // Write general function
   size_t
   write_ (const uint8_t *data, size_t length);
 

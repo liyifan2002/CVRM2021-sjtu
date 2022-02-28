@@ -4,7 +4,7 @@
 #include <iostream>
 #include <cmath>
 #include <chrono>
-
+#include <algorithm>
 #include <opencv2/opencv.hpp>
 #include <Eigen/Dense>
 #include <opencv2/core/eigen.hpp>
@@ -118,7 +118,7 @@ typedef struct Blade_{
     }
 }Blade;
 
-class EnergyDetector {
+class EnergyDetector_{
 public:
     explicit EnergyDetector();//构造函数
     ~EnergyDetector();//析构函数
@@ -159,7 +159,7 @@ private:
     void clearAll();//清空所有容器vector
     void initEnergy();//能量机关初始化
     void initEnergyPartParam();//能量机关参数初始化
-    Mat preprocess(const Mat& src);
+    static Mat preprocess(const Mat& src);
 
     bool detectArmor(Mat &src);
     bool detectFlowStripFan(Mat &src);

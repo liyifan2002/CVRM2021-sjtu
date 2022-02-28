@@ -4,16 +4,34 @@
 #include "Port/RMPort.h"
 //#include "utils/oscilloscope.h"
 
+#include "../Energy/Energy.h"
 static bool required_stop = false, camera_is_ok = false;
 
 DEFINE_bool(debug, true, "debug mode");
-DEFINE_bool(record, false, "record frame");DEFINE_string(robot, "sentry, melee, infantry, hero",
+DEFINE_bool(record, false, "record frame");
+DEFINE_string(robot, "sentry, melee, infantry, hero",
               "robot type");
 DEFINE_string(source, "",
               "image source");
 DEFINE_string(serial, "",
               "serial name");
 
+void autoaim_loop() {
+    umt::Subscriber<Mat> data_sub("camera_data");
+    float timestamp=0;
+    EnergyDetector eng(BLUE,UNIFORM);
+    try {
+        while (!required_stop) {
+            Mat ret = data_sub.pop();
+            timestamp+=1000/61.89;
+            eng.detect(ret, timestamp);
+            eng.drawOutline();
+        }
+    } catch (Exception &e) {
+        LOG(FATAL) << e.what();
+    }
+
+}
 
 int main(int argc, char *argv[]) {
     gflags::ParseCommandLineFlags(&argc, &argv, true);
@@ -31,10 +49,12 @@ int main(int argc, char *argv[]) {
         videoFile.detach();
     }
     if (FLAGS_record) {
-        std::thread videoRecoder(video_record, "../data/");
+        std::thread videoRecoder(video_record_loop, "../data/");
         videoRecoder.detach();
     }
-    std::thread viewShow(show_debug_view, std::ref(required_stop), std::ref(camera_is_ok));
+    std::thread autoAim(autoaim_loop);
+    autoAim.detach();
+    std::thread viewShow(debug_view_loop, std::ref(required_stop), std::ref(camera_is_ok));
     viewShow.join();//等待debug窗口退出
     //videoCap.join();
     //robot_io_usb("USB\\VID_1A86&PID_7523&REV_0254");

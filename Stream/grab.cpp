@@ -3,13 +3,11 @@
 #include "utils/timers.h"
 #include "utils/calibration.h"
 
-#ifdef EN_ENERGY
-#include "../Energy/EnergyDetector.h"
-EnergyDetector eng;
-#endif
-DHCam* vid;
+
+DHCam *vid;
+
 /***
- * 从相机中读图线程
+ * 从相机中读图
  * @param required_stop
  * @param camera_is_ok
  * @return
@@ -24,7 +22,7 @@ bool camera_grab_loop(bool &required_stop, bool &camera_is_ok) {
     }
     vid->openCamera();
     vid->startGrabbing();
-    vid->setFrameRate(60);
+    vid->setFrameRate(120);
     Mat ret;
     Timers t;
     camera_is_ok = true;
@@ -61,7 +59,7 @@ bool video_file_loop(bool &required_stop, bool &camera_is_ok, const string &vid_
             break;
         }
         data_pub.push(frame);
-        this_thread::sleep_for(20ms);//每帧延时
+        this_thread::sleep_for(std::chrono::milliseconds (20));//每帧延时
     }
     cap.release();//释放资源
     return true;
@@ -71,22 +69,22 @@ bool video_file_loop(bool &required_stop, bool &camera_is_ok, const string &vid_
  * @param required_stop
  * @param camera_is_ok
  */
-void show_debug_view(bool &required_stop, bool &camera_is_ok) {
+void debug_view_loop(bool &required_stop, bool &camera_is_ok) {
 
     umt::Subscriber<Mat> data_sub("camera_data");
     Timers t;
     myCalibration::init();
     //              data_sub.pop();
-    cv::namedWindow("RM console");
-    cv::createTrackbar("exp","RM console", nullptr,1e5,([](int v, void *u) -> void {
-        vid->setExposureTime(v);
-    }));
-    cv::createTrackbar("gain","RM console", nullptr,3e4,([](int v, void *u) -> void {
-        vid->setGain(double(v) / 1000);
-    }));
-    cv::setTrackbarPos("exp","RM console",vid->camConfig.exposureTime);
-    cv::setTrackbarPos("gain","RM console",vid->camConfig.imGain);
-    Mat console_panel(300,300,CV_8UC1);
+//    cv::namedWindow("RM console");
+//    cv::createTrackbar("exp", "RM console", nullptr, 1e5, ([](int v, void *u) -> void {
+//        vid->setExposureTime(v);
+//    }));
+//    cv::createTrackbar("gain", "RM console", nullptr, 3e4, ([](int v, void *u) -> void {
+//        vid->setGain(double(v) / 1000);
+//    }));
+//    cv::setTrackbarPos("exp", "RM console", vid->camConfig.exposureTime);
+//    cv::setTrackbarPos("gain", "RM console", vid->camConfig.imGain);
+    Mat console_panel(300, 300, CV_8UC1);
     //myCalibration::init();
     LOG(INFO) << "START VIEW";
     try {
@@ -96,7 +94,7 @@ void show_debug_view(bool &required_stop, bool &camera_is_ok) {
             //eng.EnergyTask(ret, false, 20);
             char key = (char) cv::waitKey(1);
 
-            console_panel*=0;
+            console_panel *= 0;
             if (key == 'c')myCalibration::inputIMG(ret);
             if (key == 's')myCalibration::calibrate();
             if (key == 'w')vid->saveConfig("DH01");
@@ -104,7 +102,7 @@ void show_debug_view(bool &required_stop, bool &camera_is_ok) {
             cv::putText(console_panel, to_string(fps).append("fps"), Point(20, 30), FONT_HERSHEY_SIMPLEX, 0.5,
                         Scalar(255));
             //cv::selectROI(ret);
-            imshow("RM console",console_panel);
+            imshow("RM console", console_panel);
             cv::imshow("out", ret);
             if (key == 27) required_stop = true;
         }
@@ -117,7 +115,7 @@ void show_debug_view(bool &required_stop, bool &camera_is_ok) {
  * 比赛视频录制函数，强制关机会出现未更新文件头的情况，数据不会丢失
  * @param storage_location
  */
-void video_record(const std::string &storage_location) {
+void video_record_loop(const std::string &storage_location) {
     char now[64];
     std::time_t tt;
     struct tm *ttime;

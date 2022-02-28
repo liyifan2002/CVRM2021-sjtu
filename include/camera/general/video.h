@@ -108,7 +108,7 @@ public:
     bool openCamera() override;                                          //初始化相机
     bool close() override;
 
-    [[nodiscard]] bool isOpen() const;
+    bool isOpen() const;
 
     bool startGrabbing() override;                                   //开始拉流
     bool stopGrabbing() override;                                      //断开拉流
